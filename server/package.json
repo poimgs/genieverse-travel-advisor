@@ -1,0 +1,16 @@
+{
+  "name": "genieverse-server",
+  "version": "1.0.0",
+  "description": "Genieverse server for handling filter options",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "csv-parse": "^5.5.3",
+    "express": "^4.18.2"
+  }
+}
