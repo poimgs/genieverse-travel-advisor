@@ -1,4 +1,4 @@
-import { FilterOptions, Location } from '../types';
+import { FilterOptions, Location, ChatMessage } from '../types';
 
 const API_BASE_URL = 'http://localhost:5000/api';
 
@@ -50,5 +50,53 @@ export const getLocations = async (): Promise<Location[]> => {
   } catch (error) {
     console.error('Failed to fetch locations:', error);
     return []; // Return empty array in case of error
+  }
+};
+
+export type ChatResponse = {
+  type: 'content' | 'partial' | 'tool_response' | 'error';
+  content: string;
+  locationIds?: string[];
+  name?: string;
+};
+
+export const streamChat = async (
+  messages: ChatMessage[],
+  locationIds: string[],
+  userPrompt: string,
+  onChunkReceived: (data: ChatResponse) => void
+): Promise<void> => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages,
+        locationIds,
+        userPrompt,
+      }),
+    });
+
+    if (!response.ok) throw new Error('Chat request failed');
+    
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('No response stream');
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const text = new TextDecoder().decode(value);
+      const events = text.split('\n\n').filter(Boolean);
+
+      for (const event of events) {
+        if (!event.startsWith('data: ')) continue;
+        const data = JSON.parse(event.slice(6));
+        onChunkReceived(data);
+      }
+    }
+  } catch (error) {
+    console.error('Error:', error);
+    throw error;
   }
 };

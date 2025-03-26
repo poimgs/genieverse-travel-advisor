@@ -5,7 +5,7 @@ export interface Location {
   categories: string[];
   area: string;
   priceRange: string;
-  audience: string[];
+  audiences: string[];
   operatingHours: string;
   themes: string[];
   address: string;
@@ -14,9 +14,20 @@ export interface Location {
 
 export interface ChatMessage {
   id: string;
-  type: 'user' | 'bot';
-  content: string;
-  recommendedLocations?: Location[];
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content?: Array<{
+    type: 'text' | 'function';
+    text?: string;
+  }>;
+  tool_calls?: Array<{
+    id: string;
+    type: string;
+    function: {
+      name: string;
+      arguments: string;
+    };
+  }>;
+  tool_call_id?: string;
 }
 
 export interface FilterOptions {

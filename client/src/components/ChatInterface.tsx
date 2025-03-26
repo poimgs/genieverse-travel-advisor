@@ -2,28 +2,39 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, RefreshCw } from 'lucide-react';
 import { ChatMessage, Location } from '../types';
 import LocationCard from './LocationCard';
+import LocationModal from './LocationModal';
+import { streamChat } from '../services/api';
 
 interface ChatInterfaceProps {
   pinnedLocations: Location[];
   onPinLocation: (location: Location) => void;
   onViewAllLocations: () => void;
-  recommendedLocations: Location[];
+  filteredLocations: Location[];
 }
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
   pinnedLocations, 
   onPinLocation, 
   onViewAllLocations,
-  recommendedLocations 
+  filteredLocations
 }) => {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: '1',
-      type: 'bot',
-      content: 'Hello! I\'m your Singapore travel assistant. How can I help you discover Singapore today?',
+      role: 'assistant',
+      content: [
+        {
+          type: 'text',
+          text: 'Hello! I\'m your Singapore travel assistant. How can I help you discover Singapore today?',
+        },
+      ],
     },
   ]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [currentRecommendedLocationIds, setCurrentRecommendedLocationIds] = useState<string[]>([]);
+  const [selectedLocation, setSelectedLocation] = useState<Location | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -34,47 +45,123 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim()) return;
-
-    // Add user message
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: Date.now().toString(),
-        type: 'user',
-        content: input,
-      },
-    ]);
-
-    // Simulate bot response with delay
-    setTimeout(() => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: (Date.now() + 1).toString(),
-          type: 'bot',
-          content: generateResponse(input),
-          recommendedLocations: recommendedLocations.slice(0, 2) // Show max 2 recommendations
-        },
-      ]);
-    }, 1000);
-
-    setInput('');
+  const getCurrentRecommendedLocations = () => {
+    return filteredLocations.filter(location => 
+      currentRecommendedLocationIds.includes(location.id)
+    );
   };
 
-  const generateResponse = (userInput: string): string => {
-    const userInputLower = userInput.toLowerCase();
-    
-    if (userInputLower.includes('food') || userInputLower.includes('eat')) {
-      return "Singapore is a food paradise! I recommend checking out the hawker centers like Maxwell Food Centre. You can also use the filters on the left to narrow down your options based on location and budget.";
-    } else if (userInputLower.includes('nature') || userInputLower.includes('park')) {
-      return "For nature lovers, Gardens by the Bay and Singapore Zoo are must-visit attractions. You can refine your search using the filters on the left sidebar.";
-    } else if (userInputLower.includes('shopping')) {
-      return "Orchard Road is Singapore's main shopping district. Marina Bay Sands also has a luxury mall. Use the filters to explore more options!";
-    } else {
-      return "Singapore has so much to offer! You can explore Gardens by the Bay, Sentosa Island, or Chinatown. Feel free to use the filters on the left to refine your search, or click the button below to browse all locations.";
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!input.trim() || isLoading) return;
+
+    const userMessage: ChatMessage = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: input,
+        },
+      ],
+    };
+
+    setMessages(prev => [...prev, userMessage]);
+    setIsLoading(true);
+    setInput('');
+
+    const botMessageId = (Date.now() + 1).toString();
+    const botMessage: ChatMessage = {
+      id: botMessageId,
+      role: 'assistant',
+      content: [],
+    };
+
+    setMessages(prev => [...prev, botMessage]);
+    let accumulatedContent = '';
+
+    try {
+      await streamChat(
+        messages.concat(userMessage),
+        filteredLocations.map(loc => loc.id),
+        input,
+        (data) => {
+          switch (data.type) {
+            case 'content':
+              setMessages(prev => {
+                const updatedMessages = [...prev];
+                const botMessageIndex = updatedMessages.findIndex(msg => msg.id === botMessageId);
+                if (botMessageIndex !== -1) {
+                  updatedMessages[botMessageIndex] = {
+                    ...updatedMessages[botMessageIndex],
+                    content: [{ type: 'text', text: data.content }],
+                  };
+                }
+                return updatedMessages;
+              });
+              // Update recommended locations if provided
+              if (data.locationIds) {
+                setCurrentRecommendedLocationIds(data.locationIds);
+              }
+              break;
+
+            case 'partial':
+              accumulatedContent += data.content;
+              if (accumulatedContent.endsWith('\n') || accumulatedContent.length > 100) {
+                setMessages(prev => {
+                  const updatedMessages = [...prev];
+                  const botMessageIndex = updatedMessages.findIndex(msg => msg.id === botMessageId);
+                  if (botMessageIndex !== -1) {
+                    updatedMessages[botMessageIndex] = {
+                      ...updatedMessages[botMessageIndex],
+                      content: [{ type: 'text', text: accumulatedContent }],
+                    };
+                  }
+                  return updatedMessages;
+                });
+              }
+              break;
+
+            case 'tool_response':
+              if (data.name === 'retrieve_locations') {
+                setMessages(prev => prev.map(msg =>
+                  msg.id === botMessageId
+                    ? { ...msg, recommendedLocations: data.content }
+                    : msg
+                ));
+              }
+              break;
+
+            case 'error':
+              console.error('Stream error:', data.content);
+              setMessages(prev => prev.map(msg =>
+                msg.id === botMessageId
+                  ? { 
+                      ...msg, 
+                      content: [{ 
+                        type: 'text', 
+                        text: (msg.content?.[0]?.text || '') + '\n\nI apologize, but I encountered an error.'
+                      }],
+                    }
+                  : msg
+              ));
+              break;
+          }
+        }
+      );
+    } catch (error) {
+      console.error('Error:', error);
+      setMessages(prev => [...prev, {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: [{
+          type: 'text',
+          text: 'I apologize, but I encountered an error. Please try again.'
+        }],
+        recommendedLocations: [],
+      }]);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -95,62 +182,72 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           <div
             key={message.id}
             className={`flex flex-col ${
-              message.type === 'user' ? 'items-end' : 'items-start'
+              message.role === 'user' ? 'items-end' : 'items-start'
             }`}
           >
             <div
-              className={`max-w-[80%] p-3 rounded-2xl ${
-                message.type === 'user'
-                  ? 'bg-blue-500 text-white rounded-tr-none'
-                  : 'bg-gray-100 rounded-tl-none'
+              className={`max-w-[80%] rounded-lg p-3 ${
+                message.role === 'user'
+                  ? 'bg-blue-500 text-white'
+                  : 'bg-gray-100 text-gray-800'
               }`}
             >
-              {message.content}
+              {message.content?.map((part, index) => (
+                <span key={index}>
+                  {part.type === 'text' ? part.text : part.type}
+                </span>
+              ))}
             </div>
-            
-            {message.recommendedLocations && message.recommendedLocations.length > 0 && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3 w-full">
-                {message.recommendedLocations.map((location) => (
-                  <LocationCard 
-                    key={location.id} 
-                    location={location} 
-                    isPinned={pinnedLocations.some(loc => loc.id === location.id)}
-                    onPin={() => onPinLocation(location)}
-                    compact={true}
-                  />
-                ))}
+            {message.role === 'assistant' && 
+             message.id === messages[messages.length - 1].id && 
+             getCurrentRecommendedLocations().length > 0 && (
+              <div className="mt-3 space-y-2 w-full">
+                <p className="text-sm text-gray-600">Recommended locations:</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {getCurrentRecommendedLocations().map((location) => (
+                    <LocationCard
+                      key={location.id}
+                      location={location}
+                      isPinned={pinnedLocations.some(pin => pin.id === location.id)}
+                      onPin={() => onPinLocation(location)}
+                      onClick={() => {
+                        setSelectedLocation(location);
+                        setIsModalOpen(true);
+                      }}
+                    />
+                  ))}
+                </div>
               </div>
             )}
           </div>
         ))}
         <div ref={messagesEndRef} />
       </div>
-      
-      <form onSubmit={handleSubmit} className="border-t p-4">
-        <div className="flex space-x-2">
-          <button 
-            type="button" 
-            className="p-2 text-gray-500 hover:text-blue-500"
-            onClick={() => setMessages([{
-              id: '1',
-              type: 'bot',
-              content: 'Hello! I\'m your Singapore travel assistant. How can I help you discover Singapore today?',
-            }])}
-          >
-            <RefreshCw size={20} />
-          </button>
+
+      <LocationModal
+        location={selectedLocation}
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        isPinned={selectedLocation ? pinnedLocations.some(pin => pin.id === selectedLocation.id) : false}
+        onPin={() => selectedLocation && onPinLocation(selectedLocation)}
+      />
+
+      <form onSubmit={handleSubmit} className="p-4 border-t">
+        <div className="flex gap-2">
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask about places to visit in Singapore..."
-            className="flex-grow p-2 border rounded-full focus:outline-none focus:ring-2 focus:ring-blue-300"
+            placeholder="Type your message..."
+            className="flex-grow p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            disabled={isLoading}
           />
           <button
             type="submit"
-            className="bg-blue-500 text-white p-2 rounded-full hover:bg-blue-600"
+            disabled={isLoading}
+            className="p-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed"
           >
-            <Send size={20} />
+            {isLoading ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
           </button>
         </div>
       </form>

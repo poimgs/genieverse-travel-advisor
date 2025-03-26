@@ -68,7 +68,7 @@ function App() {
       // Filter by audience (any match)
       if (filters.audience && filters.audience.length > 0 && !filters.audience.includes("All")) {
         const hasAudience = filters.audience.some(audience => 
-          location.audience.includes(audience)
+          location.audiences.includes(audience)
         );
         if (!hasAudience) return false;
       }
@@ -189,7 +189,7 @@ function App() {
           pinnedLocations={pinnedLocations}
           onPinLocation={handlePinLocation}
           onViewAllLocations={() => setIsCatalogOpen(true)}
-          recommendedLocations={recommendedLocations}
+          filteredLocations={filteredLocations}
         />
       </main>
 

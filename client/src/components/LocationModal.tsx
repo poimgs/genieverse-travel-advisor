@@ -81,7 +81,7 @@ const LocationModal: React.FC<LocationModalProps> = ({
                 <p className="text-sm text-gray-600 flex items-center mb-1">
                   <Tag size={16} className="mr-1.5" /> Category
                 </p>
-                <p className="font-medium">{location.category}</p>
+                <p className="font-medium">{location.categories.join(', ')}</p>
               </div>
 
               <div>
@@ -89,7 +89,7 @@ const LocationModal: React.FC<LocationModalProps> = ({
                   <Users size={16} className="mr-1.5" /> Suitable For
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  {location.audience.map((audience) => (
+                  {location.audiences.map((audience) => (
                     <span
                       key={audience}
                       className="bg-blue-100 text-blue-800 px-2.5 py-0.5 rounded-full text-sm"
