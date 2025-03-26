@@ -90,7 +90,6 @@ function App() {
     });
     
     setFilteredLocations(filtered);
-    setRecommendedLocations(filtered.slice(0, 3));
   }, [filters, allLocations]);
 
   const handlePinLocation = (location: Location) => {

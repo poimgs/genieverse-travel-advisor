@@ -34,7 +34,7 @@ export const getLocations = async (): Promise<Location[]> => {
     const response = await fetch(`${API_BASE_URL}/locations`);
     const data = await response.json();
     return data.map((location: any) => ({
-      id: location.title.toLowerCase().replace(/\s+/g, '-'), // Generate an id from name
+      id: location.id,
       title: location.title,
       link: location.link,
       address: location.address,
